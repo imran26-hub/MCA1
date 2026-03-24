@@ -129,7 +129,7 @@ select option{background:var(--card);}
 /* MODAL */
 .overlay{display:none;position:fixed;inset:0;z-index:500;background:rgba(4,6,15,.8);backdrop-filter:blur(12px);align-items:center;justify-content:center;padding:1rem;}
 .overlay.open{display:flex;}
-.modal{background:linear-gradient(160deg,var(--card),var(--card2));border:1px solid var(--border2);border-radius:20px;padding:2.25rem;width:100%;max-width:480px;box-shadow:0 40px 80px rgba(0,0,0,.5);animation:modalIn .22s ease;}
+.modal{background:linear-gradient(160deg,var(--card),var(--card2));border:1px solid var(--border2);border-radius:20px;padding:2.25rem;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;box-shadow:0 40px 80px rgba(0,0,0,.5);animation:modalIn .22s ease;}
 @keyframes modalIn{from{opacity:0;transform:scale(.95) translateY(12px);}to{opacity:1;transform:none;}}
 .modal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:1.75rem;}
 .modal-head h2{font-family:var(--head);font-size:1.4rem;font-weight:800;}
@@ -421,43 +421,14 @@ async function uploadDoc(){
   const btn=document.getElementById('u-btn');
   btn.disabled=true;btn.innerHTML='<div class="spin" style="width:16px;height:16px;border-width:1.5px"></div> Uploading...';
   
-  // Check bucket status
-  try{
-    const { data: bucket, error: bucketError } = await sb.storage.getBucket(STORAGE_BUCKET);
-    if(bucketError){
-      console.log('Bucket error:', bucketError);
-      // Try to create bucket
-      const{error:createError}=await sb.storage.createBucket(STORAGE_BUCKET,{public:true});
-      if(createError){
-        btn.disabled=false;btn.textContent='Upload ↑';
-        toast('Bucket access error: '+createError.message,'err');
-        console.log('Create bucket error:', createError);
-        return;
-      } else {
-        toast('Created new bucket: '+STORAGE_BUCKET,'ok');
-      }
-    } else {
-      console.log('Bucket found:', bucket);
-      if(!bucket.public){
-        toast('Bucket exists but is not public. Making it public...','ok');
-        // Update bucket to be public
-        const{error:updateError}=await sb.storage.updateBucket(STORAGE_BUCKET,{public:true});
-        if(updateError){
-          console.log('Update bucket error:', updateError);
-        }
-      }
-    }
-  } catch(e){
-    console.log('Bucket check exception:', e);
-    btn.disabled=false;btn.textContent='Upload ↑';
-    toast('Bucket check failed: '+e.message,'err');
-    return;
-  }
+  // Skip bucket check - go directly to upload
+  console.log('Using bucket:', STORAGE_BUCKET);
   
-  const path=`${batch_id}/sem${semester}/${Date.now()}_${file.name.replace(/\s+/g,'_')}`;
+  const path=`${batch_id}/sem${semester}/${Date.now()}_${Math.random().toString(36).substr(2,9)}_${file.name.replace(/\s+/g,'_')}`;
   console.log('Uploading to path:', path);
+  console.log('File size:', file.size);
   
-  const{error:se}=await sb.storage.from(STORAGE_BUCKET).upload(path,file,{cacheControl:'3600',upsert:false});
+  const{error:se}=await sb.storage.from(STORAGE_BUCKET).upload(path,file,{cacheControl:'3600',upsert:true});
   if(se){
     console.log('Upload error:', se);
     btn.disabled=false;btn.textContent='Upload ↑';
@@ -466,6 +437,8 @@ async function uploadDoc(){
   }
   const{data:ud}=sb.storage.from(STORAGE_BUCKET).getPublicUrl(path);
   console.log('Public URL:', ud);
+  console.log('Public URL data:', ud.publicUrl);
+  
   const{error:de}=await sb.from('documents').insert({batch_id,semester:parseInt(semester),title,type,file_url:ud.publicUrl,file_name:file.name});
   btn.disabled=false;btn.textContent='Upload ↑';
   if(de){toast('DB error: '+de.message,'err');return;}
@@ -547,7 +520,6 @@ async function loadPubBatches(){
   batches=data;
   document.getElementById('pub-batches').innerHTML=data.map((b,i)=>`
     <div class="batch-card" onclick="selectBatch('${b.id}')" style="animation-delay:${i*.07}s">
-      <div class="bc-bg">${i+1}</div>
       <div class="bc-icon">🎓</div>
       <h3>${b.name}</h3>
       <p>${b.year} &nbsp;·&nbsp; ${b.num_semesters} Semesters</p>
@@ -577,10 +549,19 @@ async function selectSem(sem){
       <div class="doc-ico">${fIcon(d.file_name)}</div>
       <div class="doc-info"><h4>${d.title}</h4><p>${d.type||''}</p></div>
       <div style="display:flex;gap:.5rem">
-        <a href="${d.file_url}" target="_blank" class="btn btn-teal btn-sm">View ↑</a>
-        <a href="${d.file_url}" download="${d.file_name}" class="btn btn-ghost btn-sm">Download ↓</a>
+        <a href="${d.file_url}" target="_blank" class="btn btn-teal btn-sm" onclick="console.log('View URL:', '${d.file_url}')">View ↑</a>
+        <button onclick="downloadFile('${d.file_url}', '${d.file_name}')" class="btn btn-ghost btn-sm">Download ↓</button>
       </div>
     </div>`).join('');
+}
+function downloadFile(url, filename) {
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 }
 function fIcon(n){if(!n)return'📄';const e=n.split('.').pop().toLowerCase();return{pdf:'📕',doc:'📘',docx:'📘',ppt:'📙',pptx:'📙',xls:'📗',xlsx:'📗',jpg:'🖼️',jpeg:'🖼️',png:'🖼️',zip:'🗜️'}[e]||'📄';}
 function showPub(s){document.getElementById('ph-home').style.display=s==='home'?'block':'none';document.getElementById('ph-sems').style.display=s==='sems'?'block':'none';document.getElementById('ph-docs').style.display=s==='docs'?'block':'none';}
