@@ -269,7 +269,7 @@ const STORAGE_BUCKET='notes';
         <select id="f-sem" onchange="applyFilter()"><option value="">All Semesters</option></select>
       </div>
       <div class="tbl-wrap"><table class="tbl">
-        <thead><tr><th>Title</th><th>Batch</th><th>Semester</th><th>Type</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Title</th><th>Batch</th><th>Semester</th><th>SUBJECT</th><th>Actions</th></tr></thead>
         <tbody id="adm-docs"><tr><td colspan="5"><div class="lc"><div class="spin"></div></div></td></tr></tbody>
       </table></div>
     </div>
@@ -292,14 +292,58 @@ const STORAGE_BUCKET='notes';
   </div>
 </div>
 
+<!-- MODAL: MANAGE SUBJECTS -->
+<div class="overlay" id="m-subjects">
+  <div class="modal">
+    <div class="modal-head"><h2>Manage Subjects</h2><div class="modal-close" onclick="closeM('m-subjects')">✕</div></div>
+    <div class="fg"><label>Batch</label>
+      <select id="s-batch" onchange="loadSubjectsList()">
+        <option value="">— Select Batch —</option>
+      </select>
+    </div>
+    <div class="fg"><label>Semester</label>
+      <select id="s-sem" onchange="loadSubjectsList()">
+        <option value="">— Select Semester —</option>
+      </select>
+    </div>
+    <div class="fg">
+      <button class="btn btn-gold" onclick="addSubject()">+ Add Subject</button>
+    </div>
+    <div class="fg" id="subject-input-section" style="display:none">
+      <label>Subject Name</label><input type="text" id="s-name" placeholder="e.g. Data Structures"/>
+    </div>
+    <div class="tbl-wrap" style="margin-top:1.5rem">
+      <table class="tbl">
+        <thead><tr><th>Subject Name</th><th>Actions</th></tr></thead>
+        <tbody id="subjects-list"><tr><td colspan="2"><div class="lc">Select batch and semester</div></td></tr></tbody>
+      </table>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeM('m-subjects')">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL: UPLOAD -->
 <div class="overlay" id="m-upload">
   <div class="modal">
     <div class="modal-head"><h2>Upload Document</h2><div class="modal-close" onclick="closeM('m-upload')">✕</div></div>
     <div class="fg"><label>Batch</label><select id="u-batch" onchange="loadUpSems()"><option value="">— Select Batch —</option></select></div>
-    <div class="fg"><label>Semester</label><select id="u-sem"><option value="">— Select Semester —</option></select></div>
+    <div class="fg"><label>Semester</label><select id="u-sem" onchange="loadSubjectsForDropdown()"><option value="">— Select Semester —</option></select></div>
     <div class="fg"><label>Document Title</label><input type="text" id="u-title" placeholder="e.g. Unit 1 — Data Structures"/></div>
-    <div class="fg"><label>Type / Subject</label><input type="text" id="u-type" placeholder="e.g. Lecture Notes, Assignment, Exam Paper"/></div>
+    <div class="fg"><label>Subject</label>
+      <div id="subject-dropdown-container" style="position:relative">
+        <select id="u-type" onchange="checkNewSubject()" style="width:100%">
+          <option value="">— Select Subject —</option>
+          <option value="__new__">— Add New Subject —</option>
+        </select>
+        <div id="subject-actions" style="margin-top:0.5rem;display:none">
+          <button type="button" onclick="editCurrentSubject()" class="btn btn-ghost btn-sm" title="Edit Subject">✏️ Edit</button>
+          <button type="button" onclick="deleteCurrentSubject()" class="btn btn-rose btn-sm" title="Delete Subject">🗑️ Delete</button>
+        </div>
+      </div>
+      <input type="text" id="u-new-type" placeholder="New Subject Name" style="display:none;margin-top:0.5rem"/>
+    </div>
     <div class="fg">
       <label>File</label>
       <div class="upload-zone">
@@ -360,6 +404,114 @@ function switchTab(n,el){
 }
 
 // BATCH CRUD
+function openSubjectManager(){
+  const sel=document.getElementById('s-batch');
+  sel.innerHTML='<option value="">— Select Batch —</option>';
+  batches.forEach(b=>sel.innerHTML+=`<option value="${b.id}">${b.name}</option>`);
+  
+  document.getElementById('s-name').value='';
+  document.getElementById('s-sem').innerHTML='<option value="">— Select Semester —</option>';
+  openM('m-subjects');
+}
+
+async function loadSubjectsList(){
+  const batchId=document.getElementById('s-batch').value;
+  const semester=document.getElementById('s-sem').value;
+  
+  if(!batchId || !semester){
+    document.getElementById('subjects-list').innerHTML='<tr><td colspan="2"><div class="lc">Select batch and semester</div></td></tr>';
+    document.getElementById('subject-input-section').style.display='none';
+    return;
+  }
+  
+  // Load semester options
+  const sel=document.getElementById('s-sem');
+  if(batchId){
+    const batch=batches.find(b=>b.id===batchId);
+    sel.innerHTML='<option value="">— Select Semester —</option>';
+    if(batch){
+      for(let i=1;i<=batch.num_semesters;i++){
+        sel.innerHTML+=`<option value="${i}">Semester ${i}</option>`;
+      }
+    }
+  }
+  
+  // Get existing subjects for this batch/semester
+  const{data,error}=await sb.from('documents').select('type').eq('batch_id',batchId).eq('semester',semester);
+  if(error){
+    console.log('Error loading subjects:', error);
+    return;
+  }
+  
+  const subjects = [...new Set(data?.map(d => d.type).filter(Boolean))];
+  const list=document.getElementById('subjects-list');
+  
+  // Show subject input section when batch and semester are selected
+  document.getElementById('subject-input-section').style.display='block';
+  
+  if(subjects.length === 0){
+    list.innerHTML='<tr><td colspan="2"><div class="empty">No subjects added yet</div></td></tr>';
+    return;
+  }
+  
+  list.innerHTML=subjects.map(subject => `
+    <tr>
+      <td>${subject}</td>
+      <td>
+        <button class="btn btn-rose btn-sm" onclick="deleteSubjectFromList('${subject}')">🗑️ Delete</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function addSubject(){
+  const batchId=document.getElementById('s-batch').value;
+  const semester=document.getElementById('s-sem').value;
+  const subjectName=document.getElementById('s-name').value.trim();
+  
+  if(!batchId || !semester || !subjectName){
+    toast('Select batch, semester, and enter subject name','err');
+    return;
+  }
+  
+  // Create a dummy document to establish the subject
+  const{error}=await sb.from('documents').insert({
+    batch_id: batchId,
+    semester: parseInt(semester),
+    title: '__subject_placeholder__',
+    type: subjectName,
+    file_url: '',
+    file_name: ''
+  });
+  
+  if(error){
+    toast('Error creating subject: '+error.message,'err');
+    return;
+  }
+  
+  toast(`Subject "${subjectName}" added`);
+  document.getElementById('s-name').value='';
+  
+  // Refresh subjects list
+  await loadSubjectsList();
+}
+
+async function deleteSubjectFromList(subject){
+  if(!confirm(`Delete subject "${subject}" and all its documents?`))return;
+  
+  const batchId=document.getElementById('s-batch').value;
+  const semester=document.getElementById('s-sem').value;
+  
+  // Delete all documents with this subject
+  const{error}=await sb.from('documents').delete().eq('batch_id',batchId).eq('semester',semester).eq('type',subject);
+  if(error){
+    toast('Error deleting subject: '+error.message,'err');
+    return;
+  }
+  
+  toast(`Subject "${subject}" deleted`);
+  await loadSubjectsList();
+}
 function openBatch(b){
   editBatch=b||null;
   document.getElementById('m-batch-title').textContent=b?'Edit Batch':'Create Batch';
@@ -396,9 +548,17 @@ function openUpload(){
   const sel=document.getElementById('u-batch');
   sel.innerHTML='<option value="">— Select Batch —</option>';
   batches.forEach(b=>sel.innerHTML+=`<option value="${b.id}" data-sems="${b.num_semesters}">${b.name}</option>`);
+  
+  // Load subjects for dropdown
+  loadSubjectsForDropdown();
+  
   document.getElementById('u-sem').innerHTML='<option value="">— Select Semester —</option>';
-  document.getElementById('u-title').value='';document.getElementById('u-type').value='';
-  document.getElementById('u-file').value='';document.getElementById('u-fname').textContent='';
+  document.getElementById('u-title').value='';
+  document.getElementById('u-type').value='';
+  document.getElementById('u-new-type').value='';
+  document.getElementById('u-new-type').style.display='none';
+  document.getElementById('u-file').value='';
+  document.getElementById('u-fname').textContent='';
   openM('m-upload');
 }
 function loadUpSems(){
@@ -408,15 +568,136 @@ function loadUpSems(){
   const ss=document.getElementById('u-sem');
   ss.innerHTML='<option value="">— Select Semester —</option>';
   for(let i=1;i<=n;i++)ss.innerHTML+=`<option value="${i}">Semester ${i}</option>`;
+  
+  // Reload subjects when batch changes
+  loadSubjectsForDropdown();
 }
 function onFile(inp){document.getElementById('u-fname').textContent=inp.files[0]?'✓ '+inp.files[0].name:'';}
+function checkNewSubject(){
+  const select=document.getElementById('u-type');
+  const input=document.getElementById('u-new-type');
+  const actions=document.getElementById('subject-actions');
+  
+  if(select.value==='__new__'){
+    input.style.display='block';
+    input.required=true;
+    select.required=false;
+    actions.style.display='none';
+  }else if(select.value){
+    input.style.display='none';
+    input.required=false;
+    select.required=true;
+    actions.style.display='block';
+  }else{
+    input.style.display='none';
+    input.required=false;
+    select.required=true;
+    actions.style.display='none';
+  }
+}
+
+async function editCurrentSubject(){
+  const select=document.getElementById('u-type');
+  const subject=select.value;
+  
+  if(!subject || subject==='__new__'){
+    toast('Select a subject to edit','err');
+    return;
+  }
+  
+  const newSubject=prompt(`Edit subject "${subject}":`, subject);
+  if(!newSubject || newSubject===subject) return;
+  
+  // Get current batch and semester
+  const batch_id=document.getElementById('u-batch').value;
+  const semester=document.getElementById('u-sem').value;
+  
+  // Update all documents with this subject
+  const{error}=await sb.from('documents').update({type: newSubject}).eq('batch_id',batch_id).eq('semester',semester).eq('type',subject);
+  if(error){
+    toast('Error updating subject: '+error.message,'err');
+    return;
+  }
+  
+  toast(`Subject renamed to "${newSubject}"`);
+  // Refresh dropdown
+  await loadSubjectsForDropdown();
+  select.value=newSubject;
+}
+
+async function deleteCurrentSubject(){
+  const select=document.getElementById('u-type');
+  const subject=select.value;
+  
+  if(!subject || subject==='__new__'){
+    toast('Select a subject to delete','err');
+    return;
+  }
+  
+  if(!confirm(`Delete subject "${subject}" and all its documents?`))return;
+  
+  // Get current batch and semester
+  const batch_id=document.getElementById('u-batch').value;
+  const semester=document.getElementById('u-sem').value;
+  
+  // Delete all documents with this subject
+  const{error}=await sb.from('documents').delete().eq('batch_id',batch_id).eq('semester',semester).eq('type',subject);
+  if(error){
+    toast('Error deleting subject: '+error.message,'err');
+    return;
+  }
+  
+  toast(`Subject "${subject}" deleted`);
+  // Refresh dropdown
+  await loadSubjectsForDropdown();
+  // Clear selection
+  select.value='';
+  document.getElementById('subject-actions').style.display='none';
+}
+async function loadSubjectsForDropdown(){
+  // Get current batch and semester from upload modal
+  const batch_id=document.getElementById('u-batch').value;
+  const semester=document.getElementById('u-sem').value;
+  
+  if(!batch_id || !semester){
+    const select=document.getElementById('u-type');
+    select.innerHTML='<option value="">— Select Subject —</option><option value="__new__">— Add New Subject —</option>';
+    return;
+  }
+  
+  // Get subjects for current batch and semester only
+  const{data,error}=await sb.from('documents').select('type').eq('batch_id',batch_id).eq('semester',semester);
+  if(error){
+    console.log('Error loading subjects:', error);
+    return;
+  }
+  
+  const subjects = [...new Set(data?.map(d => d.type).filter(Boolean))];
+  console.log('Loaded subjects for batch/semester:', subjects);
+  
+  const select=document.getElementById('u-type');
+  select.innerHTML='<option value="">— Select Subject —</option><option value="__new__">— Add New Subject —</option>';
+  subjects.forEach(subject => {
+    select.innerHTML+=`<option value="${subject}">${subject}</option>`;
+  });
+}
+
 async function uploadDoc(){
   if(!sb){toast('Supabase not configured','err');return;}
   const batch_id=document.getElementById('u-batch').value;
   const semester=document.getElementById('u-sem').value;
   const title=document.getElementById('u-title').value.trim();
-  const type=document.getElementById('u-type').value.trim();
+  let type=document.getElementById('u-type').value.trim();
   const file=document.getElementById('u-file').files[0];
+  
+  // Handle new subject
+  if(type==='__new__'){
+    type=document.getElementById('u-new-type').value.trim();
+    if(!type){
+      toast('Enter new subject name','err');return;
+    }
+  }
+  
   if(!batch_id||!semester||!title||!file){toast('Fill all fields & choose a file','err');return;}
   const btn=document.getElementById('u-btn');
   btn.disabled=true;btn.innerHTML='<div class="spin" style="width:16px;height:16px;border-width:1.5px"></div> Uploading...';
@@ -443,6 +724,15 @@ async function uploadDoc(){
   btn.disabled=false;btn.textContent='Upload ↑';
   if(de){toast('DB error: '+de.message,'err');return;}
   toast('Document uploaded!');closeM('m-upload');loadAdminAll();
+  
+  // Wait a moment for database to update, then refresh subjects
+  setTimeout(async () => {
+    await loadSubjectsForDropdown();
+  // Also refresh semester view if needed
+    if(curBatch && curSem) {
+      await loadSubjectsForSemester(curBatch.id, curSem);
+    }
+  }, 500);
 }
 async function delDoc(id,url){
   if(!confirm('Delete this document?'))return;
@@ -542,17 +832,90 @@ async function selectSem(sem){
   const list=document.getElementById('docs-list');
   list.innerHTML='<div class="lc"><div class="spin"></div></div>';
   showPub('docs');
-  const{data,error}=await sb.from('documents').select('*').eq('batch_id',curBatch.id).eq('semester',sem).order('created_at',{ascending:false});
-  if(error||!data?.length){list.innerHTML=`<div class="empty"><span class="ei">📭</span><h3>No Documents Yet</h3><p>Notes for this semester haven't been uploaded.</p></div>`;return;}
-  list.innerHTML=data.map((d,i)=>`
-    <div class="doc-item" style="animation-delay:${i*.05}s">
-      <div class="doc-ico">${fIcon(d.file_name)}</div>
-      <div class="doc-info"><h4>${d.title}</h4><p>${d.type||''}</p></div>
-      <div style="display:flex;gap:.5rem">
-        <a href="${d.file_url}" target="_blank" class="btn btn-teal btn-sm" onclick="console.log('View URL:', '${d.file_url}')">View ↑</a>
-        <button onclick="downloadFile('${d.file_url}', '${d.file_name}')" class="btn btn-ghost btn-sm">Download ↓</button>
-      </div>
-    </div>`).join('');
+  
+  // Show subjects for this semester
+  loadSubjectsForSemester(curBatch.id, sem);
+}
+async function loadSubjectsForSemester(batchId, sem){
+  // Get unique subjects for this semester
+  const{data,error}=await sb.from('documents').select('type').eq('batch_id',batchId).eq('semester',sem);
+  if(error){
+    document.getElementById('docs-list').innerHTML=`<div class="empty"><span class="ei">📭</span><h3>No Subjects Yet</h3><p>Create subjects first, then upload documents.</p></div>`;
+    return;
+  }
+  
+  // Get unique subjects with document counts
+  const subjectCounts = {};
+  data?.forEach(doc => {
+    const subject = doc.type || 'General';
+    subjectCounts[subject] = (subjectCounts[subject] || 0) + 1;
+  });
+  
+  if(Object.keys(subjectCounts).length === 0){
+    document.getElementById('docs-list').innerHTML=`<div class="empty"><span class="ei">➕</span><h3>No Subjects Yet</h3><p>Create your first subject to start organizing notes.</p></div>`;
+    return;
+  }
+  
+  // Display subjects with document counts
+  const list=document.getElementById('docs-list');
+  list.innerHTML=`
+    <div class="sec-head"><h2>📚 Subjects</h2></div>
+    <div class="sem-grid" style="grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:1rem">
+      ${Object.entries(subjectCounts).map(([subject, count], i) => `
+        <div class="sem-card" onclick="selectSubject('${subject}')" style="animation-delay:${i*.05}s;cursor:pointer">
+          <div class="sem-num" style="font-size:1.5rem">📚</div>
+          <p style="margin-bottom:0.5rem">${subject}</p>
+          <p style="font-size:0.75rem;color:var(--muted)">${count} document${count===1?'':'s'}</p>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+async function deleteSubject(subject){
+  if(!confirm(`Delete subject "${subject}" and all its documents?`))return;
+  
+  // Delete all documents with this subject
+  const{error}=await sb.from('documents').delete().eq('batch_id',curBatch.id).eq('semester',curSem).eq('type',subject);
+  if(error){
+    toast('Error deleting subject: '+error.message,'err');
+    return;
+  }
+  
+  toast(`Subject "${subject}" deleted`);
+  loadSubjectsForSemester(curBatch.id, curSem);
+}
+
+async function selectSubject(subject){
+  // Load documents for this subject
+  const{data,error}=await sb.from('documents').select('*').eq('batch_id',curBatch.id).eq('semester',curSem).eq('type',subject).order('created_at',{ascending:false});
+  if(error||!data?.length){
+    document.getElementById('docs-list').innerHTML=`<div class="empty"><span class="ei">📭</span><h3>No Documents in ${subject}</h3><p>Upload documents to this subject.</p></div>`;
+    return;
+  }
+  
+  // Display documents for selected subject
+  const list=document.getElementById('docs-list');
+  list.innerHTML=`
+    <div style="margin-bottom:1.5rem">
+      <button onclick="loadSubjectsForSemester('${curBatch.id}', ${curSem})" class="btn btn-ghost btn-sm">← Back to Subjects</button>
+    </div>
+    <div class="sec-head">
+      <div><div class="sec-label">📚 Subject</div><h3>${subject}</h3></div>
+    </div>
+    <div class="doc-list">
+      ${data.map((d,i) => `
+        <div class="doc-item" style="animation-delay:${i*.05}s">
+          <div class="doc-ico">${fIcon(d.file_name)}</div>
+          <div class="doc-info"><h4>${d.title}</h4><p>${d.type||''}</p></div>
+          <div style="display:flex;gap:.5rem">
+            <a href="${d.file_url}" target="_blank" class="btn btn-teal btn-sm">View ↑</a>
+            <button onclick="downloadFile('${d.file_url}', '${d.file_name}')" class="btn btn-ghost btn-sm">Download ↓</button>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
 }
 function downloadFile(url, filename) {
   const link = document.createElement('a');
